@@ -13,13 +13,13 @@ print "ok 1\n";
 #### construct, initialize ####
 print "Initializing audio device... ";
 my ($buf, $chan, $fmt, $rate) = (4096, 1, 8, 8192);
-$dsp = new Audio::DSP(buffer   => $buf,
-                      channels => $chan,
-                      format   => $fmt,
-                      rate     => $rate);
+my $dsp = new Audio::DSP(buffer   => $buf,
+                         channels => $chan,
+                         format   => $fmt,
+                         rate     => $rate);
 
-$seconds = 2;
-$length  = ($chan * $fmt * $rate * $seconds) / 8;
+my $seconds = 2;
+my $length  = ($chan * $fmt * $rate * $seconds) / 8;
 
 $dsp->init() || die "not ok 2 (" . $dsp->errstr . ")\n";
 print "ok 2\n";
@@ -30,7 +30,7 @@ for (my $i = 0; $i < $length; $i += $buf) {
     $dsp->read() || die "not okay 3 (" . $dsp->errstr . ")\n";
 }
 if ($dsp->datalen != 16384) {
-    print "not ok 3 (" . $dsp->datalen . " bytes recorded\; should've been 16384";
+    print "not ok 3 (" . $dsp->datalen . " bytes recorded\; should've been 16384\n";
 } else {
     print "ok 3\n";
 }
@@ -38,7 +38,7 @@ if ($dsp->datalen != 16384) {
 #### load/play test file ####
 print "Loading and playing test file... ";
 $dsp->clear;
-$dsp->audiofile('thatsall.raw') || die "not okay 4 (" . $dsp->errstr . ")\n";
+$dsp->audiofile('kazan.raw') || die "not okay 4 (" . $dsp->errstr . ")\n";
 for (;;) {
     $dsp->write || last;
 }

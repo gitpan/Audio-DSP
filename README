@@ -1,6 +1,6 @@
 Audio::DSP - Perl interface to *NIX digital audio device
 
-Version 0.01
+Version 0.02
 
 Description
 
@@ -40,12 +40,6 @@ Installation
 
 To Do / Suggestion for Data Manipulation Extentions
 
-    I may, in the future, implement PerlIO in the Audio::DSP module. For 
-    reasons on which I won't expound here, the initial (0.01) release of
-    Audio::DSP relies on C library fcntl/ioctl functions (rather than on
-    the PerlIO abstraction layer) in order to interface with the system's
-    audio device file.
-
     In keeping with purpose, I have not included any methods for data
     manipulation in the Audio::DSP extension (the Audio::DSP object
     provides storage for raw audio data read from the device, but that is
@@ -69,11 +63,11 @@ To Do / Suggestion for Data Manipulation Extentions
 Author
 
     Seth David Johnson
-    affection@pdamusic.com
+    seth@pdamusic.com
 
 Copyright
 
-    Copyright (c) 1999 Seth David Johnson. All Rights Reserved. This
+    Copyright (c) 1999-2000 Seth David Johnson. All Rights Reserved. This
     program is free software; you can redistribute it and/or modify
     it under the same terms as Perl itself.
 
@@ -86,7 +80,7 @@ See Also
         http://www.opensound.com/pguide/audio.html
 
     A GPLed version of OSS distributed with the Linux kernel was used in
-    the development of Audio::DSP. See "The Linux Sound System":
+    the development of Audio::DSP. See "The Linux Sound Subsystem":
 
         http://www.linux.org.uk/OSS/
 

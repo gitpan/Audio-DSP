@@ -1,29 +1,124 @@
-#ifdef __cplusplus
-extern "C" {
-#endif
 #include "EXTERN.h"
 #include "perl.h"
 #include "XSUB.h"
-#ifdef __cplusplus
-}
-#endif
-
+#include <stdlib.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #include <sys/soundcard.h>
 
-#define AUDIO_FILE_BUFFER_SIZE 4096 /* this is totally arbitrary */
+#define AUDIO_FILE_BUFFER_SIZE 4096
 
-int audioformat (SV* fmt) {
+static int
+not_here(char *s)
+{
+    croak("%s not implemented on this architecture", s);
+    return -1;
+}
+
+static double
+constant(char *name, int arg)
+{
+    errno = 0;
+    switch (*name) {
+    case 'A':
+        if (strEQ(name, "AFMT_A_LAW"))
+#ifdef AFMT_A_LAW
+            return AFMT_A_LAW;
+#else
+            goto not_there;
+#endif
+        if (strEQ(name, "AFMT_IMA_ADPCM"))
+#ifdef AFMT_IMA_ADPCM
+            return AFMT_IMA_ADPCM;
+#else
+            goto not_there;
+#endif
+        if (strEQ(name, "AFMT_MPEG"))
+#ifdef AFMT_MPEG
+            return AFMT_MPEG;
+#else
+            goto not_there;
+#endif
+        if (strEQ(name, "AFMT_MU_LAW"))
+#ifdef AFMT_MU_LAW
+            return AFMT_MU_LAW;
+#else
+            goto not_there;
+#endif
+        if (strEQ(name, "AFMT_QUERY"))
+#ifdef AFMT_QUERY
+            return AFMT_QUERY;
+#else
+            goto not_there;
+#endif
+        if (strEQ(name, "AFMT_S16_BE"))
+#ifdef AFMT_S16_BE
+            return AFMT_S16_BE;
+#else
+            goto not_there;
+#endif
+        if (strEQ(name, "AFMT_S16_LE"))
+#ifdef AFMT_S16_LE
+            return AFMT_S16_LE;
+#else
+            goto not_there;
+#endif
+        if (strEQ(name, "AFMT_S16_NE"))
+#ifdef AFMT_S16_NE
+            return AFMT_S16_NE;
+#else
+            goto not_there;
+#endif
+        if (strEQ(name, "AFMT_S8"))
+#ifdef AFMT_S8
+            return AFMT_S8;
+#else
+            goto not_there;
+#endif
+        if (strEQ(name, "AFMT_U16_BE"))
+#ifdef AFMT_U16_BE
+            return AFMT_U16_BE;
+#else
+            goto not_there;
+#endif
+        if (strEQ(name, "AFMT_U16_LE"))
+#ifdef AFMT_U16_LE
+            return AFMT_U16_LE;
+#else
+            goto not_there;
+#endif
+        if (strEQ(name, "AFMT_U8"))
+#ifdef AFMT_U8
+            return AFMT_U8;
+#else
+            goto not_there;
+#endif
+        break;
+    }
+    errno = EINVAL;
+    return 0;
+
+not_there:
+    errno = ENOENT;
+    return 0;
+}
+
+int _audioformat (SV* fmt) {
     char* val;
 
     /* format specified as integer */
     if (SvIOK(fmt))
         return (SvIV(fmt));
 
-    /* format specified as string */
+    /* constants are recognized as
+     * floating-point numbers
+     */
+    else if (SvNOK(fmt))
+        return (int)SvNV(fmt);
+
+    /* format specified as string - DEPRECATED */
     else if (SvPOK(fmt)) {
         val = SvPVX(fmt);
 
@@ -50,34 +145,70 @@ int audioformat (SV* fmt) {
         else if (strEQ(val, "AFMT_MPEG"))
             return(AFMT_MPEG);
         else {
-            /* croak("unrecognized format %s", fmt); */
             return(-1);
         }
     } else {
-           /* croak("format neither int nor string"); */
            return(-1);
    }
 }
 
+int _modeflag (SV* flag) {
+    int   mode;
+    char* val;
+
+    /* mode specified as integer */
+    if (SvIOK(flag))
+        mode = SvIV(flag);
+
+    /* Fcntl.pm-exported constants are recognized as
+     * floating-point numbers
+     */
+    else if (SvNOK(flag))
+        return (int)SvNV(flag);
+
+    /* mode specified as string - DEPRECATED */
+    else if (SvPOK(flag)) {
+        val = SvPVX(flag);
+        if (strEQ(val, "O_RDONLY"))
+            mode = O_RDONLY;
+        else if (strEQ(val, "O_WRONLY"))
+            mode = O_WRONLY;
+        else if (strEQ(val, "O_RDWR"))
+            mode = O_RDWR;
+        else
+            mode = -1;
+
+    } else {
+        mode = -1;
+    }
+    return(mode);
+}
+
 MODULE = Audio::DSP		PACKAGE = Audio::DSP		
 
-PROTOTYPES: DISABLED
+PROTOTYPES: ENABLED
+
+double
+constant(name,arg)
+        char *          name
+        int             arg
+
+#############################################
+################ Constructor ################
 
 void
 new (...)
     PPCODE:
     {
-        HV* construct      = newHV(); /* what the Audio::DSP object references */
-        HV* param          = newHV(); /* for storing parameters */
-        HV* thistash       = newHV(); /* erm... this stash */
+        HV* construct      = newHV();
+        HV* thistash       = newHV();
 
-        SV* buff           = newSViv(4096);    /* read/write buffer */
+        SV* buff           = newSViv(4096);    /* read/write buffer size */
         SV* chan           = newSViv(1);       /* mono(1) or stereo(2) */
         SV* data           = newSVpv("",0);    /* stored audio data */
-        SV* datalen        = newSViv(0);       /* length of stored audio data */
         SV* device         = newSVpv("/dev/dsp",8);
-        SV* error_string   = newSVpvf("",0);
-        SV* file_indicator = newSViv(0);       /* a file descriptor for now... */
+        SV* errstr         = newSVpvf("",0);
+        SV* file_indicator = newSViv(0);       /* file descriptor */
         SV* format         = newSViv(AFMT_U8); /* 8 bit unsigned is default */
         SV* mark           = newSViv(0);       /* play position */
         SV* rate           = newSViv(8192);    /* sampling rate */
@@ -88,66 +219,54 @@ new (...)
         char* key;        /* param name */
 
         int audio_fd;
-        int klength;  /* param name length */
         int status;
         int stidx;    /* stack index */
 
-        /* Store parameters in hash */
+        /******** get parameters ********/
         for (stidx = items % 2; stidx < items; stidx += 2) {
-            key     = SvPVX(ST(stidx));
-            klength = SvCUR(ST(stidx));
-            hv_store(param, key, klength, ST((stidx) + 1), 0);
-        }
+            key = SvPVX(ST(stidx));
 
-        /******** use parameters if present ********/
-        if (hv_exists(param, "device", 6))
-            sv_setpv(device, SvPVX(*hv_fetch(param, "device", 6, 0)));
+            if (strEQ(key, "device"))
+                sv_setpv(device, SvPVX(ST(stidx + 1)));
 
-        if (hv_exists(param, "buffer", 6))
-            sv_setiv(buff, SvIV(*hv_fetch(param, "buffer", 6, 0)));
+            else if (strEQ(key, "buffer"))
+                sv_setiv(buff, SvIV(ST(stidx + 1)));
 
-        if (hv_exists(param, "rate", 4))
-            sv_setiv(rate, SvIV(*hv_fetch(param, "rate", 4, 0)));
+            else if (strEQ(key, "rate"))
+                sv_setiv(rate, SvIV(ST(stidx + 1)));
 
-        if (hv_exists(param, "format", 6)) {
-            sv_setiv(format, audioformat(*hv_fetch(param, "format", 6, 0)));
-            if (SvIV(format) < 0)
-                croak("error determining audio format");
-        }
-
-        if (hv_exists(param, "channels", 8))
-            sv_setiv(chan, SvIV(*hv_fetch(param, "channels", 8, 0)));
-
-        /**** store data from existing audio file ****/
-        if (hv_exists(param, "file", 4)) {
-            audio_file = SvPVX(*hv_fetch(param, "file", 4, 0));
-
-            audio_fd = open(audio_file, O_RDONLY);
-            if (audio_fd < 0)
-                croak("failed to open %s", audio_file);
-
-            for (;;) {
-                status = read(audio_fd, audio_buff, AUDIO_FILE_BUFFER_SIZE);
-                if (status == 0)
-                    break;
-                else
-                    sv_catpvn(data, audio_buff, status);
+            else if (strEQ(key, "format")) {
+                sv_setiv(format, _audioformat(ST(stidx + 1)));
+                if (SvIV(format) < 0)
+                    croak("error determining audio format");
             }
 
-            if (close(audio_fd) < 0)
-                croak("problem closing audio file %s", audio_file);
+            else if (strEQ(key, "channels"))
+                sv_setiv(chan, SvIV(ST(stidx + 1)));
 
-            /* get size of audio data currently stored */
-            sv_setiv(datalen, SvCUR(data));
+            /**** store data from existing audio file ****/
+            else if (strEQ(key, "file")) {
+                audio_file = SvPVX(ST(stidx + 1));
+                audio_fd   = open(audio_file, O_RDONLY);
+                if (audio_fd < 0)
+                    croak("failed to open %s", audio_file);
+                for (;;) {
+                    status = read(audio_fd, audio_buff, AUDIO_FILE_BUFFER_SIZE);                    if (status == 0)
+                        break;
+                    else
+                        sv_catpvn(data, audio_buff, status);
+                }
+                if (close(audio_fd) < 0)
+                    croak("problem closing audio file %s", audio_file);
+            }
         }
 
         /******** assign settings to new object ********/
         hv_store(construct, "buffer", 6, buff, 0);
         hv_store(construct, "channels", 8, chan, 0);
         hv_store(construct, "data", 4, data, 0);
-        hv_store(construct, "datalen", 7, datalen, 0);
         hv_store(construct, "device", 6, device, 0);
-        hv_store(construct, "error_string", 12, error_string, 0);
+        hv_store(construct, "errstr", 6, errstr, 0);
         hv_store(construct, "file_indicator", 14, file_indicator, 0);
         hv_store(construct, "format", 6, format, 0);
         hv_store(construct, "mark", 4, mark, 0);
@@ -159,135 +278,58 @@ new (...)
         XPUSHs(self);                     /* push it */
     }
 
-void
-audiofile (...)
-    PPCODE:
-    {
-        HV* caller = (HV*)SvRV(ST(0));
-        char audio_buff[AUDIO_FILE_BUFFER_SIZE];
-        char* audio_file;
-        int audio_fd;
-        int status;
-
-        audio_file = SvPVX(ST(1));
-        audio_fd   = open(audio_file, O_RDONLY);
-
-        if (audio_fd < 0) {
-            hv_store(caller, "error_string", 12,
-                     newSVpvf("failed to open audio file '%s'", audio_file), 0);
-            XSRETURN_NO;
-        }
-
-        for (;;) {
-            status = read(audio_fd, audio_buff, AUDIO_FILE_BUFFER_SIZE);
-            if (status == 0)
-                break;
-            else
-                sv_catpvn(*hv_fetch(caller, "data", 4, 0), audio_buff, status);
-        }
-
-        if (close(audio_fd) < 0) {
-            hv_store(caller, "error_string", 12,
-                     newSVpvf("problem closing audio file '%s'", audio_file), 0);
-            XSRETURN_NO;
-        }
-
-        /* get size of audio data currently stored */
-        hv_store(caller, "datalen", 7,
-                 newSViv(SvCUR(*hv_fetch(caller, "data", 4, 0))), 0);
-        XSRETURN_YES;
-    }
+#################################################################
+############## Methods for opening / closing device #############
 
 void
 init (...)
     PPCODE:
     {
         SV* format;
-
         HV* caller = (HV*)SvRV(ST(0));
-        HV* param  = newHV();
-
         char* dev;
         char* key;
         char* val;
-
         int arg;
         int fd;
-        int klength;
-        int mode;  /* device open mode */
+        int mode = O_RDWR;  /* device open mode */
         int status;
         int stidx;
 
         if ((items % 2) == 0)
             croak("Odd number of elements in hash list");
 
-        /* Store parameters in hash */
         for (stidx = 1; stidx < items; stidx += 2) {
-            key     = SvPVX(ST(stidx));
-            klength = SvCUR(ST(stidx));
-            hv_store(param, key, klength, ST((stidx) + 1), 0);
-        }
+            key = SvPVX(ST(stidx));
 
-        /******** check for param, store in Audio::DSP object ********/
-        if (hv_exists(param, "device", 6))
-            hv_store(caller, "device", 6,
-                     *hv_fetch(param, "device", 6, 0), 0);
-
-        if (hv_exists(param, "buffer", 6))
-            hv_store(caller, "buffer", 6,
-                     *hv_fetch(param, "buffer", 6, 0), 0);
-
-        if (hv_exists(param, "rate", 4))
-            hv_store(caller, "rate", 4,
-                     *hv_fetch(param, "rate", 4, 0), 0);
-
-        if (hv_exists(param, "format", 6)) {
-            hv_store(caller, "format", 6,
-                     newSViv(audioformat(*hv_fetch(param, "format", 6, 0))), 0);
-            if (SvIV(*hv_fetch(caller, "format", 6, 0)) < 0) {
-                hv_store(caller, "error_string", 12,
-                         newSVpvf("error determining audio format"), 0);
-                XSRETURN_NO;
-            }
-        }
-
-        if (hv_exists(param, "channels", 8))
-            hv_store(caller, "channels", 8,
-                     *hv_fetch(param, "channels", 8, 0), 0);
-
-        /******** get file mode ********/
-        if (hv_exists(param, "mode", 4)) {
- 
-            /* mode specified as integer (why?) */
-            if (SvIOK(*hv_fetch(param, "mode", 4, 0)))
-                mode = SvIV(*hv_fetch(param, "mode", 4, 0));
- 
-            /* mode specified as string (flag) */
-            else if (SvPOK(*hv_fetch(param, "mode", 4, 0))) {
-                val = SvPVX(*hv_fetch(param, "mode", 4, 0));
-
-                if (strEQ(val, "O_RDONLY"))
-                    mode = O_RDONLY;
-                else if (strEQ(val, "O_WRONLY"))
-                    mode = O_WRONLY;
-                else if (strEQ(val, "O_RDWR"))
-                    mode = O_RDWR;
-                else {
-                    hv_store(caller, "error_string", 12,
-                             newSVpvf("unrecognized open flag"), 0);
+            if (strEQ(key, "device")) {
+                hv_store(caller, "device", 6, newSVsv(ST(stidx + 1)), 0);
+            } else if (strEQ(key, "buffer")) {
+                hv_store(caller, "buffer", 6, newSVsv(ST(stidx + 1)), 0);
+            } else if (strEQ(key, "channels")) {
+                hv_store(caller, "channels", 8, newSVsv(ST(stidx + 1)), 0);
+            } else if (strEQ(key, "rate")) {            
+                hv_store(caller, "rate", 4, newSVsv(ST(stidx + 1)), 0);
+            } else if (strEQ(key, "format")) {
+                hv_store(caller, "format", 6,
+                         newSViv(_audioformat(ST(stidx + 1))), 0);
+                if (SvIV(*hv_fetch(caller, "format", 6, 0)) < 0) {
+                    hv_store(caller, "errstr", 6,
+                             newSVpvf("error determining audio format"), 0);
                     XSRETURN_NO;
                 }
-
-            /* what on earth did you send me? */
-            } else {
-                hv_store(caller, "error_string", 12,
-                         newSVpvf("mode neither int nor string"), 0);
-                XSRETURN_NO;
             }
 
-        /* hmm... I'll just open it read/write */
-        } else
-            mode = O_RDWR;
+            /******** get file mode ********/
+            else if (strEQ(key, "mode")) {
+                mode = _modeflag(ST(stidx + 1));
+                if (mode < 0) {
+                    hv_store(caller, "errstr", 6,
+                             newSVpvf("failed to recognize open flag"), 0);
+                    XSRETURN_NO;
+                }
+            }
+        }
 
         /**** device name ****/
         dev = SvPVX(*hv_fetch(caller, "device", 6, 0));
@@ -295,7 +337,7 @@ init (...)
         /**** open device ****/
         fd = open(dev, mode);
         if (fd < 0) {
-            hv_store(caller, "error_string", 12,
+            hv_store(caller, "errstr", 6,
                      newSVpvf("failed to open device '%s'", dev), 0);
             XSRETURN_NO;
         }
@@ -304,12 +346,12 @@ init (...)
         arg = SvIV(*hv_fetch(caller, "format", 6, 0));
 
         if (ioctl(fd, SNDCTL_DSP_SETFMT, &arg) == -1) {
-            hv_store(caller, "error_string", 12,
+            hv_store(caller, "errstr", 6,
                      newSVpvf("SNDCTL_DSP_SETFMT ioctl failed"), 0);
             XSRETURN_NO;
         }
         if (arg != SvIV(*hv_fetch(caller, "format", 6, 0))) {
-            hv_store(caller, "error_string", 12,
+            hv_store(caller, "errstr", 6,
                      newSVpvf("failed to set sample format"), 0);
             XSRETURN_NO;
         }
@@ -317,13 +359,13 @@ init (...)
         /**** set channels ****/
         arg    = SvIV(*hv_fetch(caller, "channels", 8, 0));
         if (ioctl(fd, SNDCTL_DSP_CHANNELS, &arg) == -1) {
-            hv_store(caller, "error_string", 12,
+            hv_store(caller, "errstr", 6,
                      newSVpvf("SNDCTL_DSP_CHANNELS ioctl failed"), 0);
             XSRETURN_NO;
 
         }
         if (arg != SvIV(*hv_fetch(caller, "channels", 8, 0))) {
-            hv_store(caller, "error_string", 12,
+            hv_store(caller, "errstr", 6,
                      newSVpvf("failed to set number of channels"), 0);
             XSRETURN_NO;
         }
@@ -331,14 +373,49 @@ init (...)
         /**** set sampling rate ****/
         arg = SvIV(*hv_fetch(caller, "rate", 4, 0));
         if (ioctl(fd, SNDCTL_DSP_SPEED, &arg) == -1) {
-            hv_store(caller, "error_string", 12,
+            hv_store(caller, "errstr", 6,
                      newSVpvf("SNDCTL_DSP_SPEED ioctl failed"), 0);
+            XSRETURN_NO;
+        }
+        if (arg != SvIV(*hv_fetch(caller, "rate", 4, 0))) {
+            hv_store(caller, "errstr", 6,
+                     newSVpvf("failed to set sampling rate"), 0);
             XSRETURN_NO;
         }
          
         /**** store file descriptor in Audio::DSP object ****/
         hv_store(caller, "file_indicator", 14, newSViv(fd), 0);
 
+        XSRETURN_YES;
+    }
+
+void
+open (...)
+    PPCODE:
+    {
+        /* open without sending any ioctl messages */
+        HV* caller = (HV*)SvRV(ST(0));
+        SV* flag;
+        int fd;
+        int mode   = O_RDWR;
+        char* dev  = SvPVX(*hv_fetch(caller, "device", 6, 0));
+
+        if (items > 1) {
+            flag = ST(1);
+            mode = _modeflag(flag);
+            if (mode < 0) {
+                hv_store(caller, "errstr", 6,
+                     newSVpvf("unrecognized open flag"), 0);
+                XSRETURN_NO;
+            }
+        }
+        fd = open(dev, mode);
+        if (fd < 0) {
+            hv_store(caller, "errstr", 6,
+                     newSVpvf("failed to open audio device file"), 0);
+            XSRETURN_NO;
+        }
+        hv_store(caller, "file_indicator", 14, newSViv(fd), 0);
         XSRETURN_YES;
     }
 
@@ -355,6 +432,261 @@ close (...)
             XSRETURN_YES;
     }
 
+#################################################################
+####################### I/O control methods #####################
+
+void
+channels (...)
+    PPCODE:
+    {
+        HV* caller = (HV*)SvRV(ST(0));
+        int fd     = SvIV(*hv_fetch(caller, "file_indicator", 14, 0));
+        int chan, arg;
+        chan = arg = SvIV(ST(1));
+
+        if (ioctl(fd, SNDCTL_DSP_CHANNELS, &arg) == -1) {
+            hv_store(caller, "errstr", 6,
+                     newSVpvf("SNDCTL_DSP_CHANNELS ioctl failed"), 0);
+            XSRETURN_NO;
+        }
+        XPUSHs(newSViv(arg));
+    }
+
+void
+getfmts (...)
+    PPCODE:
+    {
+        HV* caller = (HV*)SvRV(ST(0));
+        int fd     = SvIV(*hv_fetch(caller, "file_indicator", 14, 0));
+        int mask;
+
+        if (ioctl(fd, SNDCTL_DSP_GETFMTS, &mask) == -1) {
+            hv_store(caller, "errstr", 6,
+                     newSVpvf("SNDCTL_DSP_GETFMTS ioctl failed"), 0);
+            XSRETURN_NO;
+        }
+        XPUSHs(newSViv(mask));
+    }
+
+void
+post (...)
+    PPCODE:
+    {
+        HV* caller = (HV*)SvRV(ST(0));
+        int fd = SvIV(*hv_fetch(caller, "file_indicator", 14, 0));
+
+        if (ioctl(fd, SNDCTL_DSP_POST, 0) == -1) {
+            hv_store(caller, "errstr", 6, 
+                     newSVpvf("SNDCTL_DSP_POST ioctl failed"), 0);
+            XSRETURN_NO;
+        }
+        XSRETURN_YES;
+    }
+
+void
+reset (...)
+    PPCODE:
+    {
+        HV* caller = (HV*)SvRV(ST(0));
+        int fd = SvIV(*hv_fetch(caller, "file_indicator", 14, 0));
+
+        if (ioctl(fd, SNDCTL_DSP_RESET, 0) == -1) {
+            hv_store(caller, "errstr", 6,
+                     newSVpvf("SNDCTL_DSP_RESET ioctl failed"), 0);
+            XSRETURN_NO;
+        }
+        XSRETURN_YES;
+    }
+
+void
+setduplex (...)
+    PPCODE:
+    {
+        HV* caller = (HV*)SvRV(ST(0));
+        int fd     = SvIV(*hv_fetch(caller, "file_indicator", 14, 0));
+
+        if (ioctl(fd, SNDCTL_DSP_SETDUPLEX) == -1) {
+            hv_store(caller, "errstr", 6,
+                     newSVpvf("SNDCTL_DSP_SETDUPLEX ioctl failed"), 0);
+            XSRETURN_NO;
+        }
+        XSRETURN_YES;
+    }
+
+void
+setfmt (...)
+    PPCODE:
+    {
+        HV* caller = (HV*)SvRV(ST(0));
+        /* SV* format = ST(1); */
+        int fd     = SvIV(*hv_fetch(caller, "file_indicator", 14, 0));
+        int fmt, arg;
+        /* fmt = arg = _audioformat(format); */
+        fmt = arg = SvIV(ST(1));
+
+        if (ioctl(fd, SNDCTL_DSP_SETFMT, &arg) == -1) {
+            hv_store(caller, "errstr", 6,
+                     newSVpvf("SNDCTL_DSP_SETFMT ioctl failed"), 0);
+            XSRETURN_NO;
+        }
+        XPUSHs(newSViv(arg));
+    }
+
+void
+speed (...)
+    PPCODE:
+    {
+        HV* caller = (HV*)SvRV(ST(0));
+        int fd     = SvIV(*hv_fetch(caller, "file_indicator", 14, 0));
+        int rate, arg;
+        rate = arg = SvIV(ST(1));
+
+        if (ioctl(fd, SNDCTL_DSP_SPEED, &arg) == -1) {
+            hv_store(caller, "errstr", 6,
+                     newSVpvf("SNDCTL_DSP_SPEED ioctl failed"), 0);
+            XSRETURN_NO;
+        }
+        XPUSHs(newSViv(arg));
+    }
+
+void
+sync (...)
+    PPCODE:
+    {
+        HV* caller = (HV*)SvRV(ST(0));
+        int fd = SvIV(*hv_fetch(caller, "file_indicator", 14, 0));
+
+        if (ioctl(fd, SNDCTL_DSP_SYNC, 0) == -1) {
+            hv_store(caller, "errstr", 6,
+                     newSVpvf("SNDCTL_DSP_SYNC ioctl failed"), 0);
+            XSRETURN_NO;
+        }
+        XSRETURN_YES;
+    }
+
+#################################################################
+##################### Direct device I/O #########################
+
+void
+dread (...)
+    PPCODE:
+    {
+        /* read data and return it */
+        HV* caller = (HV*)SvRV(ST(0));
+        int fd = SvIV(*hv_fetch(caller, "file_indicator", 14, 0));
+
+        int count;
+        int status;
+        char *buf;
+
+        if (items > 1)
+            count = SvIV(ST(1));
+        else
+            count = SvIV(*hv_fetch(caller, "buffer", 6, 0));
+
+        buf = malloc(count);
+        status = read(fd, buf, count);
+        if (status != count) {
+            hv_store(caller, "errstr", 6,
+                     newSVpvf("failed to read correct number of bytes"), 0);
+            XSRETURN_NO;
+        }
+        XPUSHs(newSVpvn(buf, status));
+        free(buf);
+    }
+
+void
+dwrite (...)
+    PPCODE:
+    {
+        HV* caller = (HV*)SvRV(ST(0));
+        int fd = SvIV(*hv_fetch(caller, "file_indicator", 14, 0));
+
+        int status;
+        int count      = SvCUR(ST(1));
+        char* diy_data = SvPVX(ST(1));
+
+        status = write(fd, diy_data, count);
+        if (status != count) {
+            hv_store(caller, "errstr", 6,
+                     newSVpvf("failed to write correct number of bytes"), 0);
+            XSRETURN_NO;
+        }
+        XSRETURN_YES;
+    }
+
+#################################################################
+##################### "data-in-memory" methods ##################
+
+void
+audiofile (...)
+    PPCODE:
+    {
+        HV* caller = (HV*)SvRV(ST(0));
+        char audio_buff[AUDIO_FILE_BUFFER_SIZE];
+        char* audio_file;
+        int audio_fd;
+        int status;
+
+        audio_file = SvPVX(ST(1));
+        audio_fd   = open(audio_file, O_RDONLY);
+
+        if (audio_fd < 0) {
+            hv_store(caller, "errstr", 6,
+                     newSVpvf("failed to open audio file '%s'", audio_file), 0);
+            XSRETURN_NO;
+        }
+
+        for (;;) {
+            status = read(audio_fd, audio_buff, AUDIO_FILE_BUFFER_SIZE);
+            if (status == 0)
+                break;
+            else
+                sv_catpvn(*hv_fetch(caller, "data", 4, 0), audio_buff, status);
+        }
+
+        if (close(audio_fd) < 0) {
+            hv_store(caller, "errstr", 6,
+                     newSVpvf("problem closing audio file '%s'", audio_file), 0);
+            XSRETURN_NO;
+        }
+        XSRETURN_YES;
+    }
+
+void
+clear (...)
+    PPCODE:
+    {
+        HV* caller = (HV*)SvRV(ST(0));
+        hv_store(caller, "data", 4, newSVpv("",0), 0);
+        hv_store(caller, "mark", 4, newSViv(0), 0);
+    }
+
+void
+data (...)
+    PPCODE:
+    {
+        XPUSHs(*hv_fetch((HV*)SvRV(ST(0)), "data", 4, 0));
+    }
+
+void
+datacat (...)
+    PPCODE:
+    {
+        HV* caller = (HV*)SvRV(ST(0));
+        int len    = SvCUR(ST(1));
+
+        sv_catpvn(*hv_fetch(caller, "data", 4, 0), SvPVX(ST(1)), len);
+        XPUSHs(sv_2mortal(newSViv(SvCUR(*hv_fetch(caller, "data", 4, 0)))));
+    }
+
+void
+datalen (...)
+    PPCODE:
+    {
+        XPUSHs(sv_2mortal(newSViv(SvCUR(*hv_fetch((HV*)SvRV(ST(0)), "data", 4, 0)))));
+    }
+
 void
 read (...)
     PPCODE:
@@ -368,15 +700,25 @@ read (...)
 
         status = read(fd, buf, count); /* record some sound */
         if (status != count) {
-            hv_store(caller, "error_string", 12,
+            hv_store(caller, "errstr", 6,
                      newSVpvf("failed to read correct number of bytes"), 0);
             XSRETURN_NO;
         }
 
         sv_catpvn(*hv_fetch(caller, "data", 4, 0), buf, status);
-        hv_store(caller, "datalen", 7,
-                 newSViv(SvCUR(*hv_fetch(caller, "data", 4, 0))), 0);
         XSRETURN_YES;
+    }
+
+void
+setmark (...)
+    PPCODE:
+    {
+        HV* caller = (HV*)SvRV(ST(0));
+        if (items >= 2) {
+            SvREFCNT_inc(ST(1));
+            hv_store(caller, "mark", 4, ST(1), 0);
+        }
+        XPUSHs(*hv_fetch(caller, "mark", 4, 0));
     }
 
 void
@@ -385,7 +727,7 @@ write (...)
     {
         HV* caller  = (HV*)SvRV(ST(0));
         int count   = SvIV(*hv_fetch(caller, "buffer", 6, 0));
-        int dlength = SvIV(*hv_fetch(caller, "datalen", 7, 0));
+        int dlength = SvCUR(*hv_fetch(caller, "data", 4, 0));
         int fd      = SvIV(*hv_fetch(caller, "file_indicator", 14, 0));
         int mark    = SvIV(*hv_fetch(caller, "mark", 4, 0));
         int status;
@@ -400,7 +742,7 @@ write (...)
 
         /*** This just causes unnecessary problems...
          * if (status != count) {
-         *   hv_store(caller, "error_string", 12,
+         *   hv_store(caller, "errstr", 6,
          *            newSVpvf("failed to write correct number of bytes"), 0);
          *   XSRETURN_NO;
          * }
@@ -410,51 +752,45 @@ write (...)
         XSRETURN_YES;
     }
 
+####################################################################
+######################### misc. methods ############################
+
 void
-post (...)
+errstr (...)
     PPCODE:
     {
-        HV* caller = (HV*)SvRV(ST(0));
-        int fd = SvIV(*hv_fetch(caller, "file_indicator", 14, 0));
-
-        if (ioctl(fd, SNDCTL_DSP_POST, 0) == -1) {
-            hv_store(caller, "error_string", 12,
-                     newSVpvf("SNDCTL_DSP_POST ioctl failed"), 0);
-            XSRETURN_NO;
-        }
-        XSRETURN_YES;
+        XPUSHs(*hv_fetch((HV*)SvRV(ST(0)), "errstr", 6, 0));
     }
 
-void
-reset (...)
-    PPCODE:
-    {
-        /************ undocumented, and useless ***********\
-        \****** since init/close take care of resets ******/
-        HV* caller = (HV*)SvRV(ST(0));
-        int fd = SvIV(*hv_fetch(caller, "file_indicator", 14, 0));
-
-        if (ioctl(fd, SNDCTL_DSP_RESET, 0) == -1) {
-            hv_store(caller, "error_string", 12,
-                     newSVpvf("SNDCTL_DSP_RESET ioctl failed"), 0);
-            XSRETURN_NO;
-        }
-        XSRETURN_YES;
-    }
+####################################################################
+################## Deprecated methods from v.0.01 ##################
 
 void
-sync (...)
+getformat (...)
     PPCODE:
     {
         HV* caller = (HV*)SvRV(ST(0));
-        int fd = SvIV(*hv_fetch(caller, "file_indicator", 14, 0));
+        SV* format = ST(1);
+        int arg    = _audioformat(format);
+        int fd     = SvIV(*hv_fetch(caller, "file_indicator", 14, 0));
+        int mask;
 
-        if (ioctl(fd, SNDCTL_DSP_SYNC, 0) == -1) {
-            hv_store(caller, "error_string", 12,
-                     newSVpvf("SNDCTL_DSP_SYNC ioctl failed"), 0);
+        if (arg < 0) {
+            hv_store(caller, "errstr", 6,
+                     newSVpvf("error determining audio format"), 0);
             XSRETURN_NO;
         }
-        XSRETURN_YES;
+
+        if (ioctl(fd, SNDCTL_DSP_GETFMTS, &mask) == -1) {
+            hv_store(caller, "errstr", 6,
+                     newSVpvf("SNDCTL_DSP_GETFMTS ioctl failed"), 0);
+            XSRETURN_NO;
+        } else if (mask & arg) /* the format is supported */
+            XSRETURN_YES;
+        else
+            hv_store(caller, "errstr", 6,
+                     newSVpvf("format not supported"), 0);
+            XSRETURN_NO;
     }
 
 void
@@ -468,65 +804,6 @@ queryformat (...)
     }
 
 void
-getformat (...)
-    PPCODE:
-    {
-        HV* caller = (HV*)SvRV(ST(0));
-        SV* format = ST(1);
-        int arg    = audioformat(format);
-        int fd     = SvIV(*hv_fetch(caller, "file_indicator", 14, 0));
-        int mask;
-
-        if (arg < 0) {
-            hv_store(caller, "error_string", 12,
-                     newSVpvf("error determining audio format"), 0);
-            XSRETURN_NO;
-        }
-
-        if (ioctl(fd, SNDCTL_DSP_GETFMTS, &mask) == -1) {
-            hv_store(caller, "error_string", 12,
-                     newSVpvf("SNDCTL_DSP_GETFMTS ioctl failed"), 0);
-            XSRETURN_NO;
-        } else if (mask & arg) /* the format is supported */
-            XSRETURN_YES;
-        else
-            hv_store(caller, "error_string", 12,
-                     newSVpvf("format not supported"), 0);
-            XSRETURN_NO;
-    }
-
-void
-clear (...)
-    PPCODE:
-    {
-        HV* caller = (HV*)SvRV(ST(0));
-        hv_store(caller, "data", 4, newSVpv("",0), 0);
-        hv_store(caller, "datalen", 7, newSViv(0), 0);
-        hv_store(caller, "mark", 4, newSViv(0), 0);
-    }
-
-void
-data (...)
-    PPCODE:
-    {
-        XPUSHs(*hv_fetch((HV*)SvRV(ST(0)), "data", 4, 0));
-    }
-
-void
-datalen (...)
-    PPCODE:
-    {
-        XPUSHs(*hv_fetch((HV*)SvRV(ST(0)), "datalen", 7, 0));
-    }
-
-void
-errstr (...)
-    PPCODE:
-    {
-        XPUSHs(*hv_fetch((HV*)SvRV(ST(0)), "error_string", 12, 0));
-    }
-
-void
 setbuffer (...)
     PPCODE:
     {
@@ -536,6 +813,18 @@ setbuffer (...)
             hv_store(caller, "buffer", 6, ST(1), 0);
         }
         XPUSHs(*hv_fetch(caller, "buffer", 6, 0));
+    }
+
+void
+setchannels (...)
+    PPCODE:
+    {
+        HV* caller = (HV*)SvRV(ST(0));
+        if (items >= 2) {
+            SvREFCNT_inc(ST(1));
+            hv_store(caller, "channels", 8, ST(1), 0);
+        }
+        XPUSHs(*hv_fetch(caller, "channels", 8, 0));
     }
 
 void
@@ -558,27 +847,15 @@ setformat (...)
 
         if (items >= 2) {
             SvREFCNT_inc(ST(1));
-            hv_store(caller, "format", 6, newSViv(audioformat(ST(1))), 0);
+            hv_store(caller, "format", 6, newSViv(_audioformat(ST(1))), 0);
             if (SvIV(*hv_fetch(caller, "format", 6, 0)) < 0) {
-                hv_store(caller, "error_string", 12,
+                hv_store(caller, "errstr", 6,
                          newSVpvf("error determining audio format"), 0);
                 XSRETURN_NO;
             }
         }
 
         XPUSHs(*hv_fetch(caller, "format", 6, 0));
-    }
-
-void
-setmark (...)
-    PPCODE:
-    {
-        HV* caller = (HV*)SvRV(ST(0));
-        if (items >= 2) {
-            SvREFCNT_inc(ST(1));
-            hv_store(caller, "mark", 4, ST(1), 0);
-        }
-        XPUSHs(*hv_fetch(caller, "mark", 4, 0));
     }
 
 void
@@ -591,30 +868,4 @@ setrate (...)
             hv_store(caller, "rate", 4, ST(1), 0);
         }
         XPUSHs(*hv_fetch(caller, "rate", 4, 0));
-    }
-
-void
-setchannels (...)
-    PPCODE:
-    {
-        HV* caller = (HV*)SvRV(ST(0));
-        if (items >= 2) {
-            SvREFCNT_inc(ST(1));
-            hv_store(caller, "channels", 8, ST(1), 0);
-        }
-        XPUSHs(*hv_fetch(caller, "channels", 8, 0));
-    }
-
-void
-datacat (...)
-    PPCODE:
-    {
-        HV* caller = (HV*)SvRV(ST(0));
-
-        int dlen = SvIV(*hv_fetch(caller, "datalen", 7, 0));
-        int len  = SvCUR(ST(1));
-
-        sv_catpvn(*hv_fetch(caller, "data", 4, 0), SvPVX(ST(1)), len);
-        hv_store(caller, "datalen", 7, newSViv(dlen + len), 0);
-        XPUSHs(*hv_fetch(caller, "datalen", 7, 0));
     }
